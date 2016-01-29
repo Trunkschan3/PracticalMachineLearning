@@ -1,0 +1,116 @@
+---
+title: "Predicting Quality of Activity"
+author: "Jason Williams"
+date: "January 29, 2016"
+output: html_document
+---
+
+#Executive Summary
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+```{R, echo = FALSE}
+library(caret)
+library(rpart)
+library(AppliedPredictiveModeling)
+library(randomForest)
+```
+
+##Uploading and Partitioning the Data 
+
+```{r, ECHO = FALSE}
+
+##Upload the Training and Test Sets. Remove any values empty / unusable values
+training <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+testing <- read.csv("pml-testing.csv", na.strings = c("NA", "#DIV/0!", ""))
+
+##Remove logical vectors that will interfere were analysis and have 0 variance
+training <- training[, -c(14,17,89,92, 127, 130)]
+testing <- testing[, -c(14,17,89,92, 127, 130)]
+
+ZeroVar <- !names(training) %in% c("amplitude_yaw_belt", "amplitude_yaw_dumbbell", "amplitude_yaw_forearm")
+training <- training[,ZeroVar]
+
+##For training and testing, remove ID variables so they aren't used in analysis
+training_1 <- training[, -c(1:7)]
+
+##Partiton the Training data into a training and test set. 
+set.seed(52015)
+inTrain <- createDataPartition(training_1$classe, p = 3/4)[[1]]
+train <- training_1[inTrain,]
+test <- training_1[-inTrain,]
+dim(train); dim(test)
+```
+
+Now that our training set is split and we can cross-validate our training set, it is time to to select important variables based on high variances. 
+
+##Variable Selection
+
+With all of the variables having so many NA values, they will not be useful for our model. Any variable have more than 50% NAs will be deleted. 
+
+```{r, echo=TRUE}
+##Create a loop that goes through all columns and deletes the ones that have over 50% NAs and assigns them to a new training set (dimension / reference issues arise when deleting columns)
+
+trainloop <- train
+for(i in 1:ncol(train)){
+    if(sum(is.na(train[,i]))/nrow(train) > 0.5){
+    for(j in 1:length(trainloop)) {
+      if( length( grep(names(train[i]), names(trainloop)[j]) ) ==1)  {
+        trainloop <- trainloop[,-j]
+      }
+    }
+  }
+}
+train <- trainloop
+dim(train)
+```  
+
+We are now down to 53 variables from the original 159 we had to choose from.
+
+##Model Creation
+
+Now we can start looking at different types of models: In this analysis, we'll use an LDA and Random Forest Models (and possibly a combination of the two)
+
+1) LDA Model: 
+
+```{r, echo=TRUE}
+train_lda <- train(classe~., method = "lda", data = train)
+pred_lda <- predict(train_lda, newdata = test)
+confusionMatrix(pred_lda, test$classe)
+```
+
+The LDA has a 70.3% Accuracy rating and we can see from the table that the model has the most difficulty predicting Bs and Cs correctly. 
+
+2) Random Forest Model
+
+```{R, echo = TRUE}
+train_rf <- randomForest(classe~., data = train)
+pred_rf <- predict(train_rf, newdata = test)
+confusionMatrix(pred_rf, test$classe)$overall
+```
+
+This model has an extremely High Accuracy of 99.55%. Let's see what happens if we create a decision tree putting both of our models together (for science!)
+
+3. Combined Decision Tree Model 
+
+```{R, echo = TRUE}
+predDF <- data.frame(pred_lda,pred_rf,classe = test$classe)
+combModFit <- train(classe~., method = "rf", data = predDF)
+combPred <- predict(combModFit, predDF)
+confusionMatrix(combPred, test$classe)
+```
+
+This method has the same accuracy (99.55%) as the previous model (to be expected) so we will use the original Random Forest model for the final product. 
+
+##Predicting on the Test set and Exporting
+
+Now we can predict the real test set and submit the assignment to look at out-of-sample error rates. 
+
+```{R, echo = TRUE}
+##Create predictions for test set. 
+TestPred <- predict(train_rf, newdata = testing)
+
+##Write file of values to submit
+write.table(TestPred, file = "testpred.txt", row.names = FALSE, col.names = FALSE)
+```
+
